@@ -33,6 +33,7 @@
             padding: 40px;
             text-align: center;
             color: white;
+            position: relative;
         }
 
         .header h1 {
@@ -163,7 +164,7 @@
             border-radius: 12px;
             padding: 22px 18px;
             text-align: center;
-            box-shadow: 0 6px 18px rgba(11, 107, 102, 0.06);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
             border: 4px solid #0b6b66; /* thick dark teal border */
             min-width: 0; /* allow flex children to shrink without overflow */
         }
@@ -329,13 +330,15 @@
 
 <body>
     <div class="container">
-        <div class="header">
+        <div class="header" style="position: relative;">
             <h1>PCR.AI ROI Business Case</h1>
             <p>Calculate the financial impact and return on investment for your laboratory</p>
         </div>
 
         <div class="content">
-            <div class="input-section">
+            <div class="input-section" style="position: relative;">
+                <button class="btn btn-secondary" style="position: absolute; top: 10px; right: 10px;" onclick="resetForm()">Reset
+                </button>
                 <h2>Laboratory Parameters</h2>
                 <div class="input-grid">
                     <div class="input-group" style="grid-column: span 2;">
@@ -411,8 +414,9 @@
                     </div>
                     <div class="input-group">
                         <label for="pcraiCost">Annual PCR.AI License Cost ($)</label>
-                        <input type="number" id="pcraiCost" value="75000" min="10000">
+                        <input type="text" id="pcraiCost" name="pcraiCost">
                     </div>
+                    <p style="font-size: 0.9em; color: #666; margin-top: 5px;">We offer discounts for commitments.</p>
                 </div>
             </div>
 
@@ -593,6 +597,17 @@
             });
         });
 
+        function calculateLicenseFee(annualSamples) {
+            if (annualSamples <= 12000) {
+                return 30000 + (annualSamples * 0.35);
+            } else if (annualSamples <= 200000) {
+                return 45000 + (annualSamples * 0.25);
+            } else {
+                // Cap at 120k for up to 350k samples
+                return Math.min(120000, 45000 + (200000 * 0.25) + ((annualSamples - 200000) * 0.25));
+            }
+        }
+
         function calculateROI() {
             var calculationMode = document.querySelector('input[name="calculationMode"]:checked').value;
             var annualSamples = 0;
@@ -631,7 +646,13 @@
             var techRate = parseFloat(document.getElementById('techHourlyRate').value) || 0;
             var supervisorRate = parseFloat(document.getElementById('supervisorRate').value) || 0;
             var currentAnalysisTime = parseInt(document.getElementById('currentAnalysisTime').value) || 0;
-            var pcraiCost = parseFloat(document.getElementById('pcraiCost').value) || 0;
+            var pcraiCostInput = parseFloat(document.getElementById('pcraiCost').value) || 0;
+            var pcraiCost = calculateLicenseFee(annualSamples);
+            // Allow manual override if user edits the cost field
+            if (pcraiCostInput && pcraiCostInput !== 0) {
+                pcraiCost = pcraiCostInput;
+            }
+            document.getElementById('pcraiCost').value = Math.round(pcraiCost);
             var errorRateReduction = parseFloat(document.getElementById('errorRateReduction').value) || 0;
             // QC time savings is a percentage of the current analysis time (e.g. 90)
             var qcTimeSavingsPercent = parseFloat(document.getElementById('qcTimeSavings').value) || 0;
@@ -703,6 +724,31 @@
             dbg += 'perSampleSavings = netAnnualSavings / annualSamples = ' + perSampleSavings.toFixed(4) + '\n';
             var debugContentEl = document.getElementById('debugContent');
             if (debugContentEl) debugContentEl.textContent = dbg;
+        }
+
+        // Auto-calculate license cost based on current sample volume
+        function updateLicenseCost() {
+            var annualSamplesEl = document.getElementById('annualSamples');
+            var annualSamples = 0;
+            var samplesPerRun = parseInt(document.getElementById('samplesPerRun').value) || 40;
+            var runsPerYear = 0;
+            var mode = document.querySelector('input[name="calculationMode"]:checked').value;
+
+            if (mode === 'annual') {
+                annualSamples = parseInt(annualSamplesEl.value) || 0;
+            } else {
+                var runsPerFrequency = parseInt(document.getElementById('runsPerFrequency').value) || 0;
+                var frequency = document.getElementById('frequency').value;
+                switch (frequency) {
+                    case 'day': runsPerYear = runsPerFrequency * 5 * 52; break;
+                    case 'week': runsPerYear = runsPerFrequency * 52; break;
+                    case 'month': runsPerYear = runsPerFrequency * 12; break;
+                    case 'year': runsPerYear = runsPerFrequency; break;
+                }
+                annualSamples = runsPerYear * samplesPerRun;
+            }
+            var autoCost = calculateLicenseFee(annualSamples);
+            document.getElementById('pcraiCost').value = Math.round(autoCost);
         }
 
         function downloadPDF() {
@@ -996,8 +1042,14 @@
         document.addEventListener('DOMContentLoaded', function () {
             var inputs = document.querySelectorAll('input');
             for (var i = 0; i < inputs.length; i++) {
-                inputs[i].addEventListener('input', calculateROI);
-                inputs[i].addEventListener('change', calculateROI);
+                inputs[i].addEventListener('input', function() {
+                    calculateROI();
+                    updateLicenseCost();
+                });
+                inputs[i].addEventListener('change', function() {
+                    calculateROI();
+                    updateLicenseCost();
+                });
             }
             document.querySelectorAll('input[name="calculationMode"]').forEach(function (radio) {
                 radio.addEventListener('change', function () {
@@ -1014,6 +1066,7 @@
                     }
 
                     calculateROI();
+                    updateLicenseCost();
                 });
             });
 
@@ -1029,6 +1082,7 @@
                     document.getElementById('annualVolumeInputs').style.display = 'none';
                     document.getElementById('runFrequencyInputs').style.display = 'block';
                     calculateROI();
+                    updateLicenseCost();
                 });
                 freqEl.addEventListener('input', function() {
                     var runsRadio = document.querySelector('input[name="calculationMode"][value="runs"]');
@@ -1036,15 +1090,17 @@
                     document.getElementById('annualVolumeInputs').style.display = 'none';
                     document.getElementById('runFrequencyInputs').style.display = 'block';
                     calculateROI();
+                    updateLicenseCost();
                 });
-             }
-             if (runsEl) {
+            }
+            if (runsEl) {
                 runsEl.addEventListener('input', function() {
                     var runsRadio = document.querySelector('input[name="calculationMode"][value="runs"]');
                     if (runsRadio) runsRadio.checked = true;
                     document.getElementById('annualVolumeInputs').style.display = 'none';
                     document.getElementById('runFrequencyInputs').style.display = 'block';
                     calculateROI();
+                    updateLicenseCost();
                 });
                 runsEl.addEventListener('change', function() {
                     var runsRadio = document.querySelector('input[name="calculationMode"][value="runs"]');
@@ -1052,11 +1108,45 @@
                     document.getElementById('annualVolumeInputs').style.display = 'none';
                     document.getElementById('runFrequencyInputs').style.display = 'block';
                     calculateROI();
+                    updateLicenseCost();
                 });
-             }
+            }
 
             calculateROI();
+            updateLicenseCost();
         });
+
+        function resetForm() {
+                const defaultValues = {
+                    runsPerFrequency: '5',
+                    frequency: 'Per Day',
+                    techHourlyRate: '35',
+                    supervisorRate: '45',
+                    currentAnalysisTime: '60',
+                    errorRateReduction: '3',
+                    qcTimeSavings: '90',
+                    samplesPerRun: '90',
+                    pcraiCost: '90000'
+                };
+
+                const inputs = document.querySelectorAll('input');
+                inputs.forEach(input => {
+                    if (input.type === 'radio') {
+                        input.checked = input.defaultChecked;
+                    } else if (defaultValues[input.id] !== undefined) {
+                        input.value = defaultValues[input.id];
+                    }
+                });
+
+                const selectElements = document.querySelectorAll('select');
+                selectElements.forEach(select => {
+                    if (defaultValues[select.id] !== undefined) {
+                        select.value = defaultValues[select.id];
+                    }
+                });
+
+                calculateROI();
+            }
     </script>
 </body>
 
