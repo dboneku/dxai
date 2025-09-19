@@ -94,6 +94,67 @@
             font-size: 14px;
         }
 
+        /* Number spinner controls (touch-friendly) */
+        .number-spinner {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1; /* preserve sizing inside .input-group */
+        }
+
+        .number-spinner input[type="number"] {
+            flex: 1;
+            padding-right: 6px; /* leave room for controls */
+            min-width: 0; /* allow shrinking in flex layouts */
+        }
+
+        /* Make select controls match number inputs in layout and style */
+        .input-group select {
+            flex: 1;
+            padding: 8px;
+            border: 2px solid #e1e5ea;
+            border-radius: 8px;
+            font-size: 14px;
+            background: white;
+            min-width: 0; /* allow flex children to shrink without causing overflow */
+        }
+
+        .spinner-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-left: 6px;
+        }
+
+        /* Spacer used for selects so their width matches number inputs with controls */
+        .spinner-spacer {
+            width: 48px; /* matches approx controls width (36px buttons + gap) */
+            height: 100%;
+            margin-left: 6px;
+        }
+
+        .spinner-btn {
+            width: 20px;
+            height: 20px;
+            border-radius: 8px;
+            border: none;
+            background: linear-gradient(135deg,#f6f8fa,#e9eef5);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+
+        .spinner-btn:active {
+            transform: translateY(1px);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        }
+
         .input-group input:focus {
             outline: none;
             border-color: #4facfe;
@@ -416,7 +477,8 @@
                         <label for="pcraiCost">Annual PCR.AI License Cost ($)</label>
                         <input type="text" id="pcraiCost" name="pcraiCost">
                     </div>
-                    <p style="font-size: 0.9em; color: #666; margin-top: 5px;">We offer discounts for commitments.</p>
+                    <div></div>
+                    <p id="discountNote" style="font-size: 1.1em; background-color: #e7e7a3; margin-top: 5px; text-align: right;">We offer discounts for commitments</p>
                 </div>
             </div>
 
@@ -575,6 +637,148 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.4.0/jspdf.umd.min.js"></script>
     <script>
+        /* Reusable touch-friendly spinner initializer
+         - Wraps number inputs in a `.number-spinner` container
+         - Adds + and - buttons to the right
+         - Honors `min`, `max`, and `step` attributes
+         - Dispatches input/change events when value changes
+         - Supports long-press for rapid increment/decrement on touch/mouse
+        */
+        (function() {
+            function clampValue(val, min, max) {
+                if (min !== null && !isNaN(min)) val = Math.max(val, min);
+                if (max !== null && !isNaN(max)) val = Math.min(val, max);
+                return val;
+            }
+
+            function toNumber(v, fallback) {
+                var n = parseFloat(v);
+                return isNaN(n) ? fallback : n;
+            }
+
+            function initControlWrapper(el) {
+                // Handle number inputs and selects
+                if (!el || el.closest('.number-spinner')) return;
+
+                var tag = el.tagName.toLowerCase();
+                if (tag !== 'input' && tag !== 'select') return;
+                if (tag === 'input' && el.type !== 'number') return;
+
+                var wrapper = document.createElement('div');
+                wrapper.className = 'number-spinner';
+
+                // For number inputs, create up/down buttons. For selects, create a spacer so widths align.
+                var isNumber = (tag === 'input');
+                var controls = null;
+                if (isNumber) {
+                    controls = document.createElement('div');
+                    controls.className = 'spinner-controls';
+
+                    var btnUp = document.createElement('button');
+                    btnUp.type = 'button';
+                    btnUp.className = 'spinner-btn spinner-up';
+                    btnUp.setAttribute('aria-label', 'Increase value');
+                    btnUp.textContent = '+';
+
+                    var btnDown = document.createElement('button');
+                    btnDown.type = 'button';
+                    btnDown.className = 'spinner-btn spinner-down';
+                    btnDown.setAttribute('aria-label', 'Decrease value');
+                    btnDown.textContent = '−';
+
+                    controls.appendChild(btnUp);
+                    controls.appendChild(btnDown);
+                } else {
+                    // spacer to visually match the horizontal space used by spinner-controls
+                    controls = document.createElement('div');
+                    controls.className = 'spinner-spacer';
+                }
+
+                // Insert wrapper into DOM preserving layout
+                el.parentNode.insertBefore(wrapper, el);
+                wrapper.appendChild(el);
+                wrapper.appendChild(controls);
+
+                if (isNumber) {
+                    var input = el;
+                    var step = toNumber(input.getAttribute('step'), 1);
+                    var min = input.hasAttribute('min') ? toNumber(input.getAttribute('min'), null) : null;
+                    var max = input.hasAttribute('max') ? toNumber(input.getAttribute('max'), null) : null;
+
+                    function changeBy(delta) {
+                        var cur = toNumber(input.value, 0);
+                        var next = cur + delta;
+                        var precision = (String(step).split('.')[1] || '').length;
+                        if (precision > 0) next = parseFloat(next.toFixed(precision));
+                        next = clampValue(next, min, max);
+                        input.value = next;
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+
+                    var holdTimer = null;
+                    var holdInterval = null;
+
+                    function startHold(delta) {
+                        if (holdTimer) return;
+                        changeBy(delta);
+                        holdTimer = setTimeout(function() {
+                            holdInterval = setInterval(function() { changeBy(delta); }, 120);
+                        }, 350);
+                    }
+                    function stopHold() {
+                        if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+                        if (holdInterval) { clearInterval(holdInterval); holdInterval = null; }
+                    }
+
+                    var btnUpEl = controls.querySelector('.spinner-up');
+                    var btnDownEl = controls.querySelector('.spinner-down');
+
+                    btnUpEl.addEventListener('mousedown', function(e){ e.preventDefault(); startHold(step); });
+                    btnUpEl.addEventListener('touchstart', function(e){ e.preventDefault(); startHold(step); }, {passive:false});
+                    btnUpEl.addEventListener('mouseup', stopHold);
+                    btnUpEl.addEventListener('mouseleave', stopHold);
+                    btnUpEl.addEventListener('touchend', stopHold);
+
+                    btnDownEl.addEventListener('mousedown', function(e){ e.preventDefault(); startHold(-step); });
+                    btnDownEl.addEventListener('touchstart', function(e){ e.preventDefault(); startHold(-step); }, {passive:false});
+                    btnDownEl.addEventListener('mouseup', stopHold);
+                    btnDownEl.addEventListener('mouseleave', stopHold);
+                    btnDownEl.addEventListener('touchend', stopHold);
+
+                    input.addEventListener('keydown', function(e){
+                        if (e.key === 'ArrowUp') { e.preventDefault(); changeBy(step); }
+                        if (e.key === 'ArrowDown') { e.preventDefault(); changeBy(-step); }
+                    });
+                }
+            }
+
+            // Initialize on all existing number inputs and observe future additions
+            function initAllSpinners() {
+                var controls = document.querySelectorAll('input[type="number"], select');
+                controls.forEach(initControlWrapper);
+            }
+
+            // Observe DOM for dynamic inputs
+            var observer = new MutationObserver(function(mutations){
+                mutations.forEach(function(m){
+                    if (m.addedNodes && m.addedNodes.length) {
+                        m.addedNodes.forEach(function(node){
+                            if (node.nodeType === 1) {
+                                if (node.matches && (node.matches('input[type="number"]') || node.matches('select'))) initControlWrapper(node);
+                                var nested = node.querySelectorAll && node.querySelectorAll('input[type="number"], select');
+                                if (nested && nested.length) nested.forEach(initControlWrapper);
+                            }
+                        });
+                    }
+                });
+            });
+
+            document.addEventListener('DOMContentLoaded', function(){
+                initAllSpinners();
+                observer.observe(document.body, { childList: true, subtree: true });
+            });
+        })();
         function formatNumber(num) {
             return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
         }
@@ -851,7 +1055,11 @@
             addSummaryRow('Error Rate Reduction (%)', errorRateReduction + '%');
             addSummaryRow('QC Time Savings (%)', qcTimeSavingsPercent + '%');
             addSummaryRow('Samples per Run', samplesPerRun);
-            addSummaryRow('PCR.AI License Cost (annual)', '$' + pcraiCost);
+            // Append discount note (if present) to the license cost line
+            var discountText = '';
+            var discountEl = document.getElementById('discountNote');
+            if (discountEl) discountText = discountEl.textContent.trim();
+            addSummaryRow('PCR.AI License Cost (annual)', '$' + pcraiCost + (discountText ? ' — ' + discountText : ''));
 
             report.appendChild(inputsSummary);
 
@@ -981,18 +1189,11 @@
 
             report.appendChild(af);
 
-            // Add page break control and spacer
-            var pageBreak = document.createElement('div');
-            pageBreak.style.pageBreakAfter = 'always';
-            pageBreak.style.height = '1px';
-            pageBreak.style.visibility = 'hidden';
-            
+            // Add a small footer spacer rather than a forced page break to avoid blank pages
             var footerSpacer = document.createElement('div');
             footerSpacer.style.width = '100%';
-            footerSpacer.style.height = '150px';
-            footerSpacer.style.minHeight = '150px';
-            
-            report.appendChild(pageBreak);
+            footerSpacer.style.height = '36px';
+            footerSpacer.style.minHeight = '36px';
             report.appendChild(footerSpacer);
 
             // Render to PDF with proper margins and no header/footer overlap
